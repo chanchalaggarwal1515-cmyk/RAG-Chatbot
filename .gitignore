@@ -1,0 +1,9 @@
+.env
+data/chroma/
+data/raw/*.html
+data/raw/*.pdf
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/

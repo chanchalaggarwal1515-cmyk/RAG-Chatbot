@@ -104,8 +104,11 @@ with st.chat_message("assistant"):
         from src.generate import GroqConfigError, GroqGenerateError
         from src.pipeline import answer_question
 
+        st.caption("DEBUG: question received")
         with st.spinner("Looking up official pages…"):
+            st.caption("DEBUG: starting retrieval")
             answer = answer_question(prompt)
+        st.caption("DEBUG: pipeline completed")
         item = {
             "role": "assistant",
             "kind": answer["kind"],
@@ -118,6 +121,7 @@ with st.chat_message("assistant"):
     except (GroqConfigError, GroqGenerateError, RuntimeError) as exc:
         text = str(exc)
         st.error(text)
+        st.exception(exc)
         st.session_state.messages.append(
             {
                 "role": "assistant",

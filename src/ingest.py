@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from pathlib import Path
 
 import chromadb
 
@@ -93,13 +94,21 @@ def ingest(*, force: bool = False) -> tuple[int, int]:
         EMBED_MODEL_NAME,
         NORMALIZE_EMBEDDINGS,
     )
-    embeddings = embed_texts(texts)
-    collection.upsert(
-        ids=[c["id"] for c in chunks],
-        documents=texts,
-        embeddings=embeddings,
-        metadatas=[_chroma_metadata(c) for c in chunks],
-    )
+    # Embed and store in small batches so ingestion does not hold the full
+    # embedding matrix in memory. This is important on low-memory hosts.
+    ingest_batch_size = 8
+    for start in range(0, len(chunks), ingest_batch_size):
+        batch = chunks[start : start + ingest_batch_size]
+        batch_texts = [c["text"] for c in batch]
+        embeddings = embed_texts(batch_texts, batch_size=ingest_batch_size)
+        collection.upsert(
+            ids=[c["id"] for c in batch],
+            documents=batch_texts,
+            embeddings=embeddings,
+            metadatas=[_chroma_metadata(c) for c in batch],
+        )
+        log.info("stored batch %s-%s of %s", start + 1, min(start + len(batch), len(chunks)), len(chunks))
+
     stored = collection.count()
     txt_count = count_chunks_in_file()
     log.info("stored %s vectors in %s; chunks.txt=%s", stored, COLLECTION_NAME, txt_count)

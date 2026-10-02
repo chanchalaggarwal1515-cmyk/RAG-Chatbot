@@ -34,7 +34,20 @@ def _load_env() -> None:
     if env_path.exists():
         from dotenv import load_dotenv
 
-        load_dotenv(env_path)
+        load_dotenv(env_path, override=False)
+    try:
+        import streamlit as st
+
+        if "GROQ_API_KEY" in st.secrets:
+            key = str(st.secrets["GROQ_API_KEY"]).strip()
+            if key:
+                os.environ["GROQ_API_KEY"] = key
+        if "GROQ_MODEL" in st.secrets:
+            model = str(st.secrets["GROQ_MODEL"]).strip()
+            if model:
+                os.environ["GROQ_MODEL"] = model
+    except Exception:
+        pass
 
 
 def groq_client() -> Groq:
@@ -42,8 +55,9 @@ def groq_client() -> Groq:
     key = os.environ.get("GROQ_API_KEY", "").strip()
     if not key:
         raise GroqConfigError(
-            "GROQ_API_KEY is missing. Copy .env.example to .env and add your Groq key. "
-            "This assistant will not answer without it."
+            "GROQ_API_KEY is missing on this host. Local .env is not deployed. "
+            "Add GROQ_API_KEY in the host secrets (Streamlit: App settings → Secrets) "
+            "or as an environment variable, then reboot the app."
         )
     return Groq(api_key=key, timeout=30.0)
 
@@ -63,25 +77,34 @@ def _chunk_block(hits: list[Hit]) -> str:
     return "\n\n".join(parts)
 
 
+def answer_from_excerpts(hits: list[Hit]) -> str:
+    """Sourced fallback: quote the top retrieved excerpt. Never invent facts."""
+    if not hits:
+        return "That fact is not in the official pages we indexed."
+    return _trim_sentences(hits[0]["text"])
+
+
 def generate_answer(question: str, hits: list[Hit]) -> str:
     """Call Groq. Returns the model body only (no citation)."""
     user = (
         f"Question: {question}\n\n"
         f"Official excerpts:\n{_chunk_block(hits)}"
     )
+    model = groq_model()
+    create_kwargs: dict = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user},
+        ],
+        "temperature": 0,
+        "max_tokens": 1024,
+    }
+    if "gpt-oss" in model:
+        create_kwargs["extra_body"] = {"reasoning_effort": "low"}
     try:
         client = groq_client()
-        # gpt-oss uses reasoning tokens; a small max_tokens can leave message.content empty.
-        response = client.chat.completions.create(
-            model=groq_model(),
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user},
-            ],
-            temperature=0,
-            max_tokens=1024,
-            extra_body={"reasoning_effort": "low"},
-        )
+        response = client.chat.completions.create(**create_kwargs)
     except GroqConfigError:
         raise
     except Exception as exc:  # noqa: BLE001 — surface provider failures to the user

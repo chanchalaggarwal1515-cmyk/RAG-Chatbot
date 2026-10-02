@@ -17,7 +17,7 @@ NORMALIZE_EMBEDDINGS = True
 
 @lru_cache(maxsize=1)
 def get_model() -> SentenceTransformer:
-    return SentenceTransformer(EMBED_MODEL_NAME)
+    return SentenceTransformer(EMBED_MODEL_NAME, device="cpu")
 
 
 def embed_texts(texts: list[str], batch_size: int = 8) -> list[list[float]]:

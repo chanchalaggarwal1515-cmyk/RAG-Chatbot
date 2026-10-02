@@ -8,7 +8,7 @@ from typing import TypedDict
 
 from src.catalog import get_source
 from src.gates import GateResult, apply_gates
-from src.generate import GroqConfigError, GroqGenerateError, generate_answer
+from src.generate import GroqConfigError, GroqGenerateError, answer_from_excerpts, generate_answer
 from src.retrieve import retrieve
 
 LOW_SCORE = 0.28
@@ -80,8 +80,14 @@ def answer_question(question: str) -> PipelineAnswer:
         }
 
     print("[pipeline] calling Groq", flush=True)
-    body = generate_answer(query, hits)
-    print("[pipeline] Groq response received", flush=True)
+    used_groq = True
+    try:
+        body = generate_answer(query, hits)
+        print("[pipeline] Groq response received", flush=True)
+    except (GroqConfigError, GroqGenerateError):
+        body = answer_from_excerpts(hits)
+        used_groq = False
+        print("[pipeline] Groq unavailable; using retrieved excerpt", flush=True)
     if gate["action"] == "strip_pii" and gate["message"]:
         body = gate["message"] + " " + body
     return {
@@ -89,7 +95,7 @@ def answer_question(question: str) -> PipelineAnswer:
         "body": body,
         "source_url": citation,
         "last_updated": last_updated,
-        "used_groq": True,
+        "used_groq": used_groq,
     }
 
 

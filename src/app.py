@@ -65,9 +65,9 @@ with st.sidebar:
 
 if not store_ok:
     st.error(
-        "The local knowledge store is empty. From the Milestone-4 folder run "
-        "`python -m src.ingest` once, then refresh this page. "
-        "This app will not download or embed documents on startup."
+        "The knowledge store is missing on this host. "
+        "The GitHub repo must include data/chroma (already committed) and the app must be rebuilt. "
+        "GROQ_API_KEY must be set in host secrets; local .env is not deployed."
     )
 
 st.write("Try an example:")

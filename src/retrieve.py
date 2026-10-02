@@ -246,15 +246,9 @@ def retrieve(question: str, top_k: int = TOP_K) -> list[Hit]:
     elif dedicated:
         source_ids = dedicated
     else:
-        # Search all indexed documents when no dedicated scheme is detected.
         source_ids = []
 
-    if source_ids:
-        hits = _scan_keyword_hits(collection, source_ids, question, top_k=max(top_k, 10))
-    else:
-        # For general questions, search the full collection using Chroma's
-        # document full-text index instead of generating a query embedding.
-        hits = _scan_keyword_hits(collection, [], question, top_k=max(top_k, 10))
+    hits = _scan_keyword_hits(collection, source_ids, question, top_k=max(top_k, 10))
 
     return _prefer(hits, question, top_k=top_k)
 

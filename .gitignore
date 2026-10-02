@@ -1,5 +1,4 @@
 .env
-data/chroma/
 data/raw/*.html
 data/raw/*.pdf
 __pycache__/

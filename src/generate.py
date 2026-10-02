@@ -45,7 +45,7 @@ def groq_client() -> Groq:
             "GROQ_API_KEY is missing. Copy .env.example to .env and add your Groq key. "
             "This assistant will not answer without it."
         )
-    return Groq(api_key=key)
+    return Groq(api_key=key, timeout=30.0)
 
 
 def groq_model() -> str:

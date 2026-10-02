@@ -6,7 +6,7 @@ import os
 
 from groq import Groq
 
-from src.load import ROOT
+ROOT = __import__("pathlib").Path(__file__).resolve().parent.parent
 from src.retrieve import Hit
 
 DEFAULT_MODEL = "openai/gpt-oss-20b"

@@ -7,7 +7,7 @@ import re
 import sys
 from typing import Any, TypedDict
 
-from src.ingest import get_collection
+from src.store import get_collection
 
 TOP_K = 5
 CANDIDATE_K = 40

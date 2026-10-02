@@ -20,7 +20,7 @@ def get_model() -> SentenceTransformer:
     return SentenceTransformer(EMBED_MODEL_NAME)
 
 
-def embed_texts(texts: list[str], batch_size: int = 64) -> list[list[float]]:
+def embed_texts(texts: list[str], batch_size: int = 8) -> list[list[float]]:
     model = get_model()
     vectors = model.encode(
         texts,

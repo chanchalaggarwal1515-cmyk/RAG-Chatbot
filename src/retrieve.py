@@ -206,12 +206,14 @@ def _scan_keyword_hits(
         # Chroma's $contains filter is case-sensitive, so search common case variants.
         variants = list(dict.fromkeys([term, term.lower(), term.upper()]))
         for variant in variants:
-            data = collection.get(
-                where={"source_id": {"$in": list(source_ids)}},
-                where_document={"$contains": variant},
-                limit=top_k,
-                include=["documents", "metadatas"],
-            )
+            kwargs: dict[str, Any] = {
+                "where_document": {"$contains": variant},
+                "limit": top_k,
+                "include": ["documents", "metadatas"],
+            }
+            if source_ids:
+                kwargs["where"] = {"source_id": {"$in": list(source_ids)}}
+            data = collection.get(**kwargs)
             ids = data.get("ids") or []
             docs = data.get("documents") or []
             metas = data.get("metadatas") or []

@@ -58,7 +58,9 @@ def answer_question(question: str) -> PipelineAnswer:
         return _from_gate(gate)
 
     query = gate["sanitized_question"]
+    print(f"[pipeline] question received: {query!r}", flush=True)
     hits = retrieve(query)
+    print(f"[pipeline] retrieved {len(hits)} hits", flush=True)
     last_updated = max((h["ingested_at"] for h in hits if h["ingested_at"]), default=None)
     citation = hits[0]["source_url"] if hits else _fallback_url(query)
 
@@ -77,7 +79,9 @@ def answer_question(question: str) -> PipelineAnswer:
             "used_groq": False,
         }
 
+    print("[pipeline] calling Groq", flush=True)
     body = generate_answer(query, hits)
+    print("[pipeline] Groq response received", flush=True)
     if gate["action"] == "strip_pii" and gate["message"]:
         body = gate["message"] + " " + body
     return {

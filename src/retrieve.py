@@ -194,45 +194,41 @@ def _scan_keyword_hits(
     question: str,
     top_k: int = 20,
 ) -> list[Hit]:
-    """Retrieve by Chroma's document full-text filter, avoiding query-time embeddings."""
+    """Scan the small prebuilt corpus once and rank matching chunks in Python."""
     terms = _search_terms(question)
     if not terms:
         return []
 
-    found: dict[str, Hit] = {}
-    matched_terms: dict[str, int] = {}
+    data = collection.get(include=["documents", "metadatas"])
+    ids = data.get("ids") or []
+    docs = data.get("documents") or []
+    metas = data.get("metadatas") or []
+    allowed = set(source_ids)
 
-    for term in terms:
-        # Chroma's $contains filter is case-sensitive, so search common case variants.
-        variants = list(dict.fromkeys([term, term.lower(), term.upper()]))
-        for variant in variants:
-            kwargs: dict[str, Any] = {
-                "where_document": {"$contains": variant},
-                "limit": top_k,
-                "include": ["documents", "metadatas"],
-            }
-            if source_ids:
-                kwargs["where"] = {"source_id": {"$in": list(source_ids)}}
-            data = collection.get(**kwargs)
-            ids = data.get("ids") or []
-            docs = data.get("documents") or []
-            metas = data.get("metadatas") or []
-            for chunk_id, doc, meta in zip(ids, docs, metas):
-                text = doc or ""
-                if chunk_id not in found:
-                    found[chunk_id] = _to_hit(chunk_id, text, dict(meta or {}), 0.05)
-                    matched_terms[chunk_id] = 0
-                matched_terms[chunk_id] += 1
+    ranked: list[tuple[int, int, Hit]] = []
+    for chunk_id, doc, meta in zip(ids, docs, metas):
+        metadata = dict(meta or {})
+        if allowed and str(metadata.get("source_id", "")) not in allowed:
+            continue
 
-    ranked = list(found.values())
+        text = doc or ""
+        lowered = text.lower()
+        matched = sum(1 for term in terms if term.lower() in lowered)
+        if matched == 0:
+            continue
+
+        hit = _to_hit(chunk_id, text, metadata, 0.05)
+        fact_bonus = _fact_bonus(question, text)
+        ranked.append((matched, fact_bonus, hit))
+
     ranked.sort(
-        key=lambda hit: (
-            -matched_terms.get(hit["id"], 0),
-            -_fact_bonus(question, hit["text"]),
-            _source_rank(hit, question),
+        key=lambda item: (
+            -item[0],
+            -item[1],
+            _source_rank(item[2], question),
         )
     )
-    return ranked[:top_k]
+    return [item[2] for item in ranked[:top_k]]
 
 
 def retrieve(question: str, top_k: int = TOP_K) -> list[Hit]:

@@ -7,7 +7,6 @@ import re
 import sys
 from typing import Any, TypedDict
 
-from src.embedder import embed_texts
 from src.ingest import get_collection
 
 TOP_K = 5
@@ -156,55 +155,108 @@ def _query_hits(
         raise
 
 
-def _scan_keyword_hits(collection: Any, source_ids: tuple[str, ...] | list[str], question: str) -> list[Hit]:
-    needles: list[str] = []
-    for pattern, terms in FACT_TERMS:
+def _search_terms(question: str) -> list[str]:
+    """Build a small set of lexical search terms without loading an embedding model."""
+    terms: list[str] = []
+
+    scheme = detect_scheme(question)
+    if scheme == "elss":
+        terms.extend(["ELSS", "elss", "Tax Saver", "tax saver"])
+    elif scheme == "flexicap":
+        terms.extend(["Flexi Cap", "flexi cap", "Flexicap", "flexicap"])
+    elif scheme == "largecap":
+        terms.extend(["Large Cap", "large cap", "Blue Chip", "blue chip"])
+
+    for pattern, fact_terms in FACT_TERMS:
         if pattern.search(question):
-            needles.extend(terms)
-    if not needles:
+            terms.extend(fact_terms)
+
+    if wants_statements(question):
+        terms.extend(["capital gain", "Capital Gain", "statement", "Statement"])
+
+    # Keep useful content words as a fallback for ordinary factual questions.
+    stopwords = {
+        "what", "is", "the", "of", "a", "an", "and", "or", "to", "how",
+        "does", "do", "for", "from", "in", "on", "can", "i", "this", "that",
+        "fund", "scheme", "icici", "prudential",
+    }
+    for word in re.findall(r"[A-Za-z][A-Za-z-]{2,}", question):
+        if word.lower() not in stopwords:
+            terms.append(word)
+
+    # Preserve order while removing duplicates.
+    return list(dict.fromkeys(term.strip() for term in terms if term.strip()))
+
+
+def _scan_keyword_hits(
+    collection: Any,
+    source_ids: tuple[str, ...] | list[str],
+    question: str,
+    top_k: int = 20,
+) -> list[Hit]:
+    """Retrieve by Chroma's document full-text filter, avoiding query-time embeddings."""
+    terms = _search_terms(question)
+    if not terms:
         return []
-    data = collection.get(
-        where={"source_id": {"$in": list(source_ids)}},
-        include=["documents", "metadatas"],
+
+    found: dict[str, Hit] = {}
+    matched_terms: dict[str, int] = {}
+
+    for term in terms:
+        # Chroma's $contains filter is case-sensitive, so search common case variants.
+        variants = list(dict.fromkeys([term, term.lower(), term.upper()]))
+        for variant in variants:
+            data = collection.get(
+                where={"source_id": {"$in": list(source_ids)}},
+                where_document={"$contains": variant},
+                limit=top_k,
+                include=["documents", "metadatas"],
+            )
+            ids = data.get("ids") or []
+            docs = data.get("documents") or []
+            metas = data.get("metadatas") or []
+            for chunk_id, doc, meta in zip(ids, docs, metas):
+                text = doc or ""
+                if chunk_id not in found:
+                    found[chunk_id] = _to_hit(chunk_id, text, dict(meta or {}), 0.05)
+                    matched_terms[chunk_id] = 0
+                matched_terms[chunk_id] += 1
+
+    ranked = list(found.values())
+    ranked.sort(
+        key=lambda hit: (
+            -matched_terms.get(hit["id"], 0),
+            -_fact_bonus(question, hit["text"]),
+            _source_rank(hit, question),
+        )
     )
-    ids = data.get("ids") or []
-    docs = data.get("documents") or []
-    metas = data.get("metadatas") or []
-    found: list[Hit] = []
-    for chunk_id, doc, meta in zip(ids, docs, metas):
-        text = doc or ""
-        lowered = text.lower()
-        if any(needle in lowered for needle in needles):
-            found.append(_to_hit(chunk_id, text, dict(meta or {}), 0.05))
-    found.sort(key=lambda hit: -_fact_bonus(question, hit["text"]))
-    return found[:10]
+    return ranked[:top_k]
 
 
 def retrieve(question: str, top_k: int = TOP_K) -> list[Hit]:
     if not question.strip():
         raise ValueError("question is empty")
+
     collection = get_collection()
     if collection.count() == 0:
         raise RuntimeError("Chroma collection is empty. Run: python -m src.ingest")
 
-    embedding = embed_texts([question.strip()])[0]
-    n_results = min(max(top_k, CANDIDATE_K), collection.count())
-    hits = _query_hits(collection, embedding, n_results)
-
     scheme = detect_scheme(question)
     dedicated = DEDICATED_SOURCES.get(scheme or "", ())
-    source_ids: tuple[str, ...] | list[str]
     if wants_statements(question):
-        source_ids = ("investor-services",)
+        source_ids: tuple[str, ...] | list[str] = ("investor-services",)
     elif dedicated:
         source_ids = dedicated
     else:
-        source_ids = ()
+        # Search all indexed documents when no dedicated scheme is detected.
+        source_ids = []
 
     if source_ids:
-        where = {"source_id": {"$in": list(source_ids)}}
-        hits = _merge_hits(hits, _query_hits(collection, embedding, min(n_results, 20), where=where))
-        hits = _merge_hits(hits, _scan_keyword_hits(collection, source_ids, question))
+        hits = _scan_keyword_hits(collection, source_ids, question, top_k=max(top_k, 10))
+    else:
+        # For general questions, search the full collection using Chroma's
+        # document full-text index instead of generating a query embedding.
+        hits = _scan_keyword_hits(collection, [], question, top_k=max(top_k, 10))
 
     return _prefer(hits, question, top_k=top_k)
 
